@@ -103,6 +103,7 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
+		return
 	}
 }
 
@@ -111,6 +112,6 @@ func (h *TaskHandler) sendNotification(task *models.Task){
 
 	//模拟一个耗时操作
 	time.Sleep(3 *time.Second)
-
+	log.Printf("Successfully sent notification for task:%d(%s)", task.ID, task.Title)
 	log.Printf("Successfully sent nitification for task:%d(%s)", task.ID, task.Title)
 }

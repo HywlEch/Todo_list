@@ -32,7 +32,7 @@ func NewPostgresStore(cfg config.DBConfig) (*PostgresStore, error) {
 
 func (s *PostgresStore) CreateTask(ctx context.Context, task *models.Task) error {
 	query := `INSERT INTO tasks (title, content, done) VALUES ($1, $2, $3) RETURNING id, created_at, updated_at;`
-	err:= s.DB.QueryRowContext(ctx, query, task.Title, task.Content, task.Done).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, query, task.Title, task.Content, task.Done).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil { 
 		return fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -66,7 +66,7 @@ func (s *PostgresStore) GetTaskByID(ctx context.Context, id int) (*models.Task, 
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound 
 		}
-		return nil, fmt.Errorf("store: failed to update task %d: %w", task.ID, err)
+		return nil, fmt.Errorf("store: failed to get task %d: %w", id, err)
 	}
 	return &task, nil
 }

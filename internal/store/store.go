@@ -6,7 +6,7 @@ import(
 	"github.com/HywlEch/Todo_list/internal/models"
 )
 
-var ErrNotFound = errors.New("requsted resourse not found")
+var ErrNotFound = errors.New("requested resource not found")
 // Store 是我们数据存储层的接口
 type Store interface {
 	CreateTask(ctx context.Context,task *models.Task) error
