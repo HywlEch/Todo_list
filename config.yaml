@@ -1,0 +1,10 @@
+database :
+  user: "todouser"
+  password: "todopass"
+  dbname: "todolist_db"
+  host: "localhost"
+  port: 5433
+  sslmode: "disable"
+
+server:
+  port: "8080"
