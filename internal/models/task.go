@@ -11,4 +11,5 @@ type Task struct {
 	Done       bool   		`json:"done"`
 	CreatedAt  time.Time	`json:"created_at"`
 	UpdatedAt  time.Time    `json:"update_at"`
+	UserId     int          `json:"user_id"`
 }

@@ -16,8 +16,22 @@ import (
 	"github.com/HywlEch/Todo_list/internal/middleware"
 	"github.com/HywlEch/Todo_list/internal/store"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
+func initRedisClient(cfg config.RedisConfig)*redis.Client {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.Addr,
+		Password: cfg.Password,
+		DB: cfg.DB,
+	})
+	//检查连接
+	if _, err := rdb.Ping(context.Background()).Result(); err != nil {
+		log.Fatalf("Redis连接失败：%s",err)
+	}
+	log.Println("Redis连接成功")
+	return rdb
+}
 func main() {
 	// 1. 加载配置
 	cfg, err := config.LoadConfig()
@@ -31,8 +45,14 @@ func main() {
 	}
 	defer dbStore.DB.Close()
 
+	//初始化Redis客户端
+	redisClient := initRedisClient(cfg.Redis)
+	defer redisClient.Close()
+
 	//初始化Handler
 	taskHandler := handlers.NewTaskHandler(dbStore)
+	//初始化UserHandler，传入JWT配置
+	userHandler := handlers.NewUserHandler(dbStore, cfg.JWT)
 
 	//设置路由
 
@@ -41,10 +61,18 @@ func main() {
 	//全局应用中间件
 	router.Use(middleware.Logger()) //应用日志中间件
 	router.Use(gin.Recovery()) //使用gin默认的Recovery中间件,防止panic
+	router.Use(middleware.RateLimitMiddleware(redisClient))
 	router.Use(middleware.TimeoutMiddleware(10 * time.Second))//应用5秒钟超时中间件
+
+	authRouter := router.Group("/auth")
+	{
+		authRouter.POST("/regist", userHandler.Regiester)
+		authRouter.POST("/login", userHandler.Login)
+	}
 
 	taskRouter := router.Group("/tasks")
 	{
+		taskRouter.Use(middleware.AuthMiddleware(cfg.JWT.Secret))
 		taskRouter.POST("", taskHandler.CreateTask)
 		taskRouter.GET("", taskHandler.GetTasks)
 		taskRouter.GET("/:id", taskHandler.GetTaskByID)
@@ -77,7 +105,7 @@ func main() {
 	//在这里监听SIGINT(CTRL+C)和SIGTERM信号
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	//阻塞主进程吗知道quitchannel 收到一个信号
+	//阻塞主进程,直到quitchannel 收到一个信号
 	<-quit
 	log.Println("关闭服务中...")
 
@@ -91,5 +119,4 @@ func main() {
 		log.Fatal("Server forced to shutdown:", err)
 	}
 	log.Println("Server exiting")
-
 }

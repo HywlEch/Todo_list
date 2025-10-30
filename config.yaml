@@ -8,3 +8,13 @@ database :
 
 server:
   port: "8080"
+
+#--JWT配置--
+jwt:
+  secret: "todo_jwt_secret"
+  expirehours: 72
+
+redis:
+  addr: "localhost6379"
+  password: ""
+  db: 0

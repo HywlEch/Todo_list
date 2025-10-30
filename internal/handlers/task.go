@@ -13,6 +13,7 @@ import (
 	"github.com/HywlEch/Todo_list/internal/store"
 	"github.com/gin-gonic/gin"
 )
+	
 
 // TaskHandler 包含任务相关的 handler
 type TaskHandler struct {
@@ -24,13 +25,33 @@ func NewTaskHandler(s store.Store) *TaskHandler {
 	return &TaskHandler{Store: s}
 }
 
+//辅助函数 从Gin上下文中安全的获取userID
+func getUserIDFromContext(c *gin.Context)(int, bool){
+	userIDAny, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的用户ID"})
+		return 0, false
+	}
+	userID, OK := userIDAny.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ID类型错误"})
+		return 0, false
+	}
+	return userID, OK
+}
+
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var task models.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+	task.UserId = userID
+	
 	if err := h.Store.CreateTask(c.Request.Context(), &task); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task"})
 		return
@@ -42,7 +63,11 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 }
 
 func (h *TaskHandler) GetTasks(c *gin.Context) {
-	tasks, err := h.Store.GetTasks(c.Request.Context())
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+	tasks, err := h.Store.GetTasks(c.Request.Context(),userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tasks"})
 		return
@@ -56,7 +81,11 @@ func (h *TaskHandler) GetTaskByID(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
 		return
 	}
-	task, err := h.Store.GetTaskByID(c.Request.Context(), id)
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
+	task, err := h.Store.GetTaskByID(c.Request.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -74,8 +103,13 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
 		return
 	}
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
 	var task models.Task
 	task.ID = id
+	task.UserId = userID
 	if err := c.ShouldBindJSON(&task); err != nil { 
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -93,11 +127,15 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 
 func (h *TaskHandler) DeleteTask(c *gin.Context) { 
 	id, err := strconv.Atoi(c.Param("id"))
+	userID, ok := getUserIDFromContext(c)
+	if !ok {
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
 		return
 	}
-	if err := h.Store.DeleteTask(c.Request.Context(), id); err != nil { 
+	if err := h.Store.DeleteTask(c.Request.Context(), id, userID); err != nil { 
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
@@ -105,6 +143,8 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
 		return
 	}
+	//删除成功返回204
+	c.Status(http.StatusNoContent)
 }
 
 func (h *TaskHandler) sendNotification(task *models.Task){

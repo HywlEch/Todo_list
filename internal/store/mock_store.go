@@ -10,6 +10,24 @@ type MockStore struct {
 	mock.Mock //嵌入 testify 的mock对象
 }
 
+func NewMockStore() *MockStore {
+	return &MockStore{}
+}
+
+func (m *MockStore)CreateUser(ctx context.Context, user *models.User)error {
+	args := m.Called(ctx, user)
+	return args.Error(0)
+
+}
+
+func (m *MockStore) GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
+	args := m.Called(ctx, username)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.User), args.Error(1)
+}
+
 //模拟CreateTask实现
 func (m *MockStore) CreateTask(ctx context.Context, task *models.Task) error {
 	args := m.Called(ctx, task)
@@ -17,14 +35,14 @@ func (m *MockStore) CreateTask(ctx context.Context, task *models.Task) error {
 }
 
 // GetTasks 的模拟实现
-func (m *MockStore) GetTasks(ctx context.Context) ([]models.Task, error){
-	args := m.Called(ctx)
+func (m *MockStore) GetTasks(ctx context.Context, userID int) ([]models.Task, error){
+	args := m.Called(ctx, userID)
 	return args.Get(0).([]models.Task), args.Error(1)
 }
 
 // GetTaskByID 的模拟实现
-func (m *MockStore) GetTaskByID(ctx context.Context, id int) (*models.Task, error) {
-	args := m.Called(ctx, id)
+func (m *MockStore) GetTaskByID(ctx context.Context,id int, userid int) (*models.Task, error) {
+	args := m.Called(ctx, id, userid)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -38,7 +56,7 @@ func (m *MockStore) UpdateTask(ctx context.Context, task *models.Task) error {
 }
 
 // DeleteTask 是模拟实现
-func (m *MockStore) DeleteTask(ctx context.Context, id int) error {
-	args := m.Called(ctx, id)
+func (m *MockStore) DeleteTask(ctx context.Context, id int, userID int) error {
+	args := m.Called(ctx, id, userID)
 	return args.Error(0)
 }

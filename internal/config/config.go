@@ -8,6 +8,8 @@ import (
 type Config struct {
 	Database DBConfig
 	Server   ServerConfig
+	JWT      JWTConfig
+	Redis    RedisConfig
 }
 
 // DBConfig 结构体用于映射 database 部分的配置
@@ -25,6 +27,18 @@ type ServerConfig struct {
 	Port string
 }
 
+//JWTConfig 结构体用于映射 jwt 部分的配置
+type JWTConfig struct {
+	Secret 			string
+    ExpiresInHours	int
+}
+
+//RedisConfig 结构体用于映射 redis 部分的配置
+type RedisConfig struct {
+	Addr 		string
+	Password 	string
+	DB 			int
+}
 // LoadConfig 从 config.yaml 文件加载配置
 func LoadConfig() (config Config, err error) {
 	// 设置配置文件的名称和类型
