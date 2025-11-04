@@ -3,38 +3,44 @@ package handlers
 
 import (
 	//"database/sql"
-	"errors"
+	// "errors"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+	"fmt"
+	
 
+	"github.com/HywlEch/Todo_list/internal/apperrors"
 	"github.com/HywlEch/Todo_list/internal/models"
 	"github.com/HywlEch/Todo_list/internal/store"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redsync/redsync/v4"
 )
-	
 
-// TaskHandler 包含任务相关的 handler
+//包含任务相关的 handler
 type TaskHandler struct {
-	Store store.Store // 依赖接口，而不是具体实现
+	Store 	store.Store 
+	Redsync *redsync.Redsync
 }
 
-// NewTaskHandler 创建一个新的 TaskHandler
-func NewTaskHandler(s store.Store) *TaskHandler {
-	return &TaskHandler{Store: s}
+//创建一个新的 TaskHandler
+func NewTaskHandler(s store.Store, rs *redsync.Redsync) *TaskHandler {
+	return &TaskHandler{Store: s,
+	Redsync: rs,
+	}
 }
 
 //辅助函数 从Gin上下文中安全的获取userID
 func getUserIDFromContext(c *gin.Context)(int, bool){
 	userIDAny, ok := c.Get("userID")
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的用户ID"})
+		c.Error(apperrors.NewUnauthorizedError("用户ID未找到", nil))
 		return 0, false
 	}
 	userID, OK := userIDAny.(int)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "ID类型错误"})
+		c.Error(apperrors.NewInternalServerError("ID类型错误", nil))
 		return 0, false
 	}
 	return userID, OK
@@ -43,17 +49,17 @@ func getUserIDFromContext(c *gin.Context)(int, bool){
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	var task models.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Error(apperrors.NewBadRequestError("输入格式错误", err))
 		return
 	}
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
 		return
 	}
-	task.UserId = userID
+	task.UserID = userID
 	
 	if err := h.Store.CreateTask(c.Request.Context(), &task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task"})
+		c.Error(err)
 		return
 	}
 	go h.sendNotification(&task)
@@ -69,7 +75,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	}
 	tasks, err := h.Store.GetTasks(c.Request.Context(),userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tasks"})
+		c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, tasks)
@@ -78,7 +84,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 func (h *TaskHandler) GetTaskByID(c *gin.Context) { 
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		c.Error(apperrors.NewBadRequestError("id格式错误", err))
 		return
 	}
 	userID, ok := getUserIDFromContext(c)
@@ -87,11 +93,7 @@ func (h *TaskHandler) GetTaskByID(c *gin.Context) {
 	}
 	task, err := h.Store.GetTaskByID(c.Request.Context(), id, userID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve task"})
+		c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, task)
@@ -100,7 +102,7 @@ func (h *TaskHandler) GetTaskByID(c *gin.Context) {
 func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		c.Error(apperrors.NewBadRequestError("ID不合理", err))
 		return
 	}
 	userID, ok := getUserIDFromContext(c)
@@ -108,18 +110,32 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 	var task models.Task
-	task.ID = id
-	task.UserId = userID
 	if err := c.ShouldBindJSON(&task); err != nil { 
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Error(apperrors.NewBadRequestError("不合理得输入", err))
 		return
 	}
-	if err := h.Store.UpdateTask(c.Request.Context(), &task); err != nil { 
-		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
+	task.ID = id
+	task.UserID = userID
+
+	//添加分布式锁
+	lockKey := fmt.Sprintf("lock:task:%d", id)
+	mutex := h.Redsync.NewMutex(lockKey, redsync.WithContext(c.Request.Context()))
+	if err := mutex.Lock(); err != nil {
+		log.Printf("获取锁失败: %v", err)
+		c.Error(apperrors.NewInternalServerError("请稍后重试", err))
+		return
+	}
+	log.Printf("获取锁成功")
+	defer func() {
+		if ok, err := mutex.Unlock(); !ok || err != nil { 
+			log.Printf("释放锁失败: %v", err)
+		}else {
+			log.Printf("释放锁成功")
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task"})
+	}()
+
+	if err := h.Store.UpdateTask(c.Request.Context(), &task); err != nil { 
+		c.Error(err)
 		return
 	}
 	c.JSON(http.StatusOK, task)
@@ -127,20 +143,16 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 
 func (h *TaskHandler) DeleteTask(c *gin.Context) { 
 	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.Error(apperrors.NewBadRequestError("ID格式错误", err))
+		return
+	}
 	userID, ok := getUserIDFromContext(c)
 	if !ok {
 		return
 	}
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
-		return
-	}
 	if err := h.Store.DeleteTask(c.Request.Context(), id, userID); err != nil { 
-		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
+		c.Error(err)
 		return
 	}
 	//删除成功返回204

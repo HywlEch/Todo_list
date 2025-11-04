@@ -9,21 +9,22 @@ import (
 
 	"github.com/HywlEch/Todo_list/internal/config"
 	"github.com/HywlEch/Todo_list/internal/models"
+	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // PostgresStore 实现了 Store 接口
 type PostgresStore struct {
-	DB *sql.DB
+	DB *sqlx.DB
 }
 
 // NewPostgresStore 创建一个新的 PostgresStore 实例
 func NewPostgresStore(cfg config.DBConfig) (*PostgresStore, error) {
 	connStr := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%d sslmode=%s",
 		cfg.User, cfg.Password, cfg.DBName, cfg.Host, cfg.Port, cfg.SSLMode)
-	// connStr := "user=todouser password=todopass dbname=todolist_db host=localhost port=5433 sslmode=disable"
-	db, err := sql.Open("postgres", connStr)
+
+	db, err := sqlx.Open("postgres", connStr)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (s *PostgresStore) CreateUser(ctx context.Context, user *models.User) error
 		return fmt.Errorf("hash password 失败: %w", err)
 	}
 	query := `INSERT INTO users (username, password_hash) VALUES($1, $2) RETURNING id, created_at;`
-	err = s.DB.QueryRowContext(ctx, query, user.Username, string(hashedPassword)).Scan(&user.ID, &user.CreatedAt)
+	err = s.DB.QueryRowxContext(ctx, query, user.Username, string(hashedPassword)).Scan(&user.ID, &user.CreatedAt)
 	if err != nil {
 		if pgErr, ok := err.(*pq.Error);ok && pgErr.Code == "23505"{
 			return ErrUserExists
@@ -53,7 +54,7 @@ func (s *PostgresStore) CreateUser(ctx context.Context, user *models.User) error
 func (s *PostgresStore)GetUserByUsername(ctx context.Context, username string ) (*models.User, error){
 	query := `SELECT id, username, password_hash, created_at FROM users WHERE username = $1;`
 	var user models.User
-	err := s.DB.QueryRowContext(ctx, query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	err := s.DB.GetContext(ctx,&user, query, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound // 使用我们标准不匹配错误
@@ -66,8 +67,8 @@ func (s *PostgresStore)GetUserByUsername(ctx context.Context, username string ) 
 
 
 func (s *PostgresStore) CreateTask(ctx context.Context, task *models.Task) error {
-	query := `INSERT INTO tasks (title, content, done,user_id) VALUES ($1, $2, $3,$4) RETURNING id, created_at, updated_at;`
-	err := s.DB.QueryRowContext(ctx, query, task.Title, task.Content, task.Done, task.ID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt)
+	query := `INSERT INTO tasks (title, content, done,user_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at;`
+	err := s.DB.QueryRowxContext(ctx, query, task.Title, task.Content, task.Done, task.UserID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt)
 	if err != nil { 
 		return fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -75,20 +76,12 @@ func (s *PostgresStore) CreateTask(ctx context.Context, task *models.Task) error
 }
 
 func (s *PostgresStore) GetTasks(ctx context.Context, userID int) ([]models.Task, error) {
-	query := `SELECT id, title, content, done, created_at, updated_at, user_id FROM tasks WHERE $user_id = $1 ORDER BY created_at DESC;`
-	rows, err := s.DB.QueryContext(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("store: failed to get tasks: %w", err)
-	}
-	defer rows.Close()
+	query := `SELECT id, title, content, done, created_at, updated_at, user_id FROM tasks WHERE user_id = $1 ORDER BY created_at DESC;`
 
 	var tasks []models.Task
-	for rows.Next() {
-		var task models.Task
-		if err := rows.Scan(&task.ID, &task.Title, &task.Content, &task.Done, &task.CreatedAt, &task.UpdatedAt, &task.UserId); err != nil {
-			return nil, fmt.Errorf("store: failed to scan task row: %w", err)
-		}
-		tasks = append(tasks, task)
+	err := s.DB.SelectContext(ctx, &tasks, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to get tasks: %w", err)
 	}
 	return tasks, nil
 }
@@ -96,7 +89,7 @@ func (s *PostgresStore) GetTasks(ctx context.Context, userID int) ([]models.Task
 func (s *PostgresStore) GetTaskByID(ctx context.Context, id int, userID int) (*models.Task, error) {
 	query := `SELECT id, title, content, done, created_at, updated_at, user_id FROM tasks WHERE id = $1	AND user_id = $2;`
 	var task models.Task
-	err := s.DB.QueryRowContext(ctx, query, id, userID).Scan(&task.ID, &task.Title, &task.Content, &task.Done, &task.CreatedAt, &task.UpdatedAt, &task.UserId)
+	err := s.DB.GetContext(ctx,&task, query, id, userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound 
@@ -109,7 +102,7 @@ func (s *PostgresStore) GetTaskByID(ctx context.Context, id int, userID int) (*m
 func (s *PostgresStore) UpdateTask(ctx context.Context, task *models.Task) error {
 	query := `UPDATE tasks SET title = $1, content = $2, done = $3, updated_at =NOW() WHERE id = $4 AND user_id = $5 RETURNING updated_at;`
 	// 我们需要扫描返回的 updated_at，更新到传入的 task 对象上
-	err := s.DB.QueryRowContext(ctx, query, task.Title, task.Content, task.Done, task.ID,task.UserId).Scan(&task.UpdatedAt)
+	err := s.DB.QueryRowxContext(ctx, query, task.Title, task.Content, task.Done, task.ID,task.UserID).Scan(&task.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ErrNotFound
@@ -120,13 +113,14 @@ func (s *PostgresStore) UpdateTask(ctx context.Context, task *models.Task) error
 }
 
 func (s *PostgresStore) DeleteTask(ctx context.Context, id int,userID int) error {
-	query := `DELETE FROM tasks WHERE id = $1, AND user_id = $2;`
-	_, err := s.DB.ExecContext(ctx, query, id,userID)
+	query := `DELETE FROM tasks WHERE id = $1 AND user_id = $2;`
+	res, err := s.DB.ExecContext(ctx, query, id,userID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return ErrNotFound
-		}
-		return fmt.Errorf("store: failed to delete task %d: %w", id, err)
+		return fmt.Errorf("删除任务失败 %d: %w", id, err)
+	}
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

@@ -35,7 +35,7 @@ func TestGetTaskByID_Success(t *testing.T) {
 	mockStore.On("GetTaskByID", 1).Return(mockTask, nil)
 
 	// 5. 用我们的 mock store 创建 handler
-	taskHandler := NewTaskHandler(mockStore)
+	taskHandler := NewTaskHandler(mockStore, nil)
 
 	// --- ACT (执行) ---
 	// 1. 设置路由
@@ -72,7 +72,7 @@ func TestGetTaskByID_NotFound(t *testing.T) {
 	mockStore := new(store.MockStore)
 
 	mockStore.On("GetTaskByID", 2).Return(nil, store.ErrNotFound)
-	taskHandler := NewTaskHandler(mockStore)
+	taskHandler := NewTaskHandler(mockStore, nil)
 	// ACT
 	router := gin.Default()
 	router.GET("/tasks/:id", taskHandler.GetTaskByID)

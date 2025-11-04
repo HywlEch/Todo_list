@@ -11,6 +11,7 @@ import (
 	"github.com/HywlEch/Todo_list/internal/models"
 	"github.com/HywlEch/Todo_list/internal/store"
 	"github.com/HywlEch/Todo_list/internal/config"
+	"github.com/HywlEch/Todo_list/internal/apperrors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -35,17 +36,14 @@ type RegisterRequest struct {
 func (h *UserHandler)Regiester(c *gin.Context){
 	var req RegisterRequest
 	if err :=  c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不合理得输入"+ err.Error()})
+		c.Error(apperrors.NewBadRequestError("不合理得输入", err))
 	}
 	user := &models.User{
 		Username: req.Username,
 		PasswordHash: req.Password,
 		}
 	if err := h.Store.CreateUser(c.Request.Context(), user); err != nil {
-		if errors.Is(err,store.ErrUserExists){
-			c.JSON(http.StatusBadRequest, gin.H{"error": "用户已存在"})
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建用户失败"})
+		c.Error(err)
 		return
 	}
 
@@ -69,26 +67,27 @@ type LoginResponse struct {
 func (h *UserHandler)Login(c *gin.Context){
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "不合理得输入"})
+		c.Error(apperrors.NewBadRequestError("不合理得输入", err))
 	}
 	user, err := h.Store.GetUserByUsername(c.Request.Context(),req.Username) 
 	if err != nil { 
 		if errors.Is(err, store.ErrNotFound) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
-			return
+			c.Error(apperrors.NewUnauthorizedError("用户不存在", err))
+		}else {
+			c.Error(err)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "登录失败"})
 		return
 	}
+
 	//验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "密码错误"})
+		c.Error(apperrors.NewUnauthorizedError("密码错误", err))
 		return
 	}
 	//密码验证成功，生成JWT
 	token, err := h.generateJWT(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成JWT失败"})
+		c.Error(apperrors.NewInternalServerError("生成JWT失败", err))
 		return
 	}
 	c.JSON(http.StatusOK, LoginResponse{Token: token})

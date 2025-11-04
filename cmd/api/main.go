@@ -17,7 +17,11 @@ import (
 	"github.com/HywlEch/Todo_list/internal/store"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
+	"github.com/go-redsync/redsync/v4"
+	"github.com/go-redsync/redsync/v4/redis/goredis/v8"
 )
+
+
 
 func initRedisClient(cfg config.RedisConfig)*redis.Client {
 	rdb := redis.NewClient(&redis.Options{
@@ -49,10 +53,18 @@ func main() {
 	redisClient := initRedisClient(cfg.Redis)
 	defer redisClient.Close()
 
+	//创建CacheStore装饰器
+	cacheDbStore := store.NewCacheStore(dbStore, redisClient)
+
+	//初始化Redsync
+	pool := goredis.NewPool(redisClient) //使用redisv8创建连接池
+	rs := redsync.New(pool)
+	log.Println("redsync初始化成功")
+
 	//初始化Handler
-	taskHandler := handlers.NewTaskHandler(dbStore)
+	taskHandler := handlers.NewTaskHandler(cacheDbStore, rs)
 	//初始化UserHandler，传入JWT配置
-	userHandler := handlers.NewUserHandler(dbStore, cfg.JWT)
+	userHandler := handlers.NewUserHandler(cacheDbStore, cfg.JWT)
 
 	//设置路由
 
@@ -61,6 +73,7 @@ func main() {
 	//全局应用中间件
 	router.Use(middleware.Logger()) //应用日志中间件
 	router.Use(gin.Recovery()) //使用gin默认的Recovery中间件,防止panic
+	router.Use(middleware.ErrorMiddleware())
 	router.Use(middleware.RateLimitMiddleware(redisClient))
 	router.Use(middleware.TimeoutMiddleware(10 * time.Second))//应用5秒钟超时中间件
 
