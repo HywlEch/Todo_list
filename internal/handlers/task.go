@@ -3,7 +3,7 @@ package handlers
 
 import (
 	//"database/sql"
-	// "errors"
+	//"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -118,9 +118,10 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	task.UserID = userID
 
 	//添加分布式锁
-	lockKey := fmt.Sprintf("lock:task:%d", id)
-	mutex := h.Redsync.NewMutex(lockKey, redsync.WithContext(c.Request.Context()))
-	if err := mutex.Lock(); err != nil {
+	ctx := c.Request.Context()
+	mutexName := fmt.Sprintf("lock:task:%d", id)
+	mutex := h.Redsync.NewMutex(mutexName, redsync.WithTries(3), redsync.WithRetryDelay(200*time.Millisecond))
+	if err := mutex.LockContext(ctx); err != nil {
 		log.Printf("获取锁失败: %v", err)
 		c.Error(apperrors.NewInternalServerError("请稍后重试", err))
 		return
